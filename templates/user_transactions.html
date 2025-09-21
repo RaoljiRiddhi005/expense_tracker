@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2 class="mb-4">Transactions</h2>
+
+<!-- Top Bar: Transaction Type, Sort, Download, Filter Button -->
+<div class="d-flex flex-wrap align-items-center mb-3 gap-2">
+  <!-- Transaction Type -->
+  <div>
+    <label class="form-label mb-0">Transaction Type</label>
+    <select id="filterType" class="form-select">
+      <option value="all" {% if filter_type=="all" %}selected{% endif %}>All</option>
+      <option value="income" {% if filter_type=="income" %}selected{% endif %}>Income</option>
+      <option value="expense" {% if filter_type=="expense" %}selected{% endif %}>Expense</option>
+    </select>
+  </div>
+
+  <!-- Sort By -->
+  <div class="ms-3">
+    <label class="form-label mb-0">Sort By</label>
+    <select id="sortOrder" class="form-select">
+      <option value="recent" {% if sort=="recent" %}selected{% endif %}>Recent</option>
+      <option value="oldest" {% if sort=="oldest" %}selected{% endif %}>Oldest</option>
+    </select>
+  </div>
+
+  <!-- Download PDF -->
+  <div class="mt-4 ms-3">
+    <button class="btn btn-primary" id="downloadPDF">Download PDF</button>
+  </div>
+
+  <!-- Filter Modal Trigger -->
+  <div class="mt-4 ms-auto">
+    <button class="btn btn-secondary" data-bs-toggle="modal" data-bs-target="#filterModal">Filter by Time</button>
+  </div>
+</div>
+
+<!-- Transactions Table -->
+<div class="card p-3">
+  <table class="table table-striped" id="transactionsTable">
+    <thead>
+      <tr>
+        <th>Type</th>
+        <th>Amount</th>
+        <th>Category/Source</th>
+        <th>Description/Notes</th>
+        <th>Payment/Received Via</th>
+        <th>Date</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in transactions %}
+      <tr>
+        <td>{{ t.type }}</td>
+        <td>{{ t.amount }}</td>
+        <td>{{ t.category if t.type=='Expense' else t.source }}</td>
+        <td>{{ t.description if t.type=='Expense' else t.notes }}</td>
+        <td>{{ t.payment_mode if t.type=='Expense' else t.received_via }}</td>
+        <td>{{ t.date }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Filter Modal -->
+<div class="modal fade" id="filterModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Filter Transactions by Time</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3">
+          <!-- Time Filter -->
+          <div class="col-md-6">
+            <label class="form-label">Filter Time</label>
+            <select id="filterTime" class="form-select">
+              <option value="year" {% if time_filter=="year" %}selected{% endif %}>Yearly</option>
+              <option value="month" {% if time_filter=="month" %}selected{% endif %}>Monthly</option>
+              <option value="week" {% if time_filter=="week" %}selected{% endif %}>Weekly</option>
+            </select>
+          </div>
+
+          <!-- Year -->
+          <div class="col-md-6">
+            <label class="form-label">Year</label>
+            <select id="filterYear" class="form-select">
+              {% for y in range(2023, 2031) %}
+                <option value="{{ y }}" {% if year==y %}selected{% endif %}>{{ y }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Month -->
+          <div class="col-md-6" id="monthSelect" {% if time_filter!="month" and time_filter!="week" %}style="display:none"{% endif %}>
+            <label class="form-label">Month</label>
+            <select id="filterMonth" class="form-select">
+              {% set months = [
+                (1, "January"), (2, "February"), (3, "March"), (4, "April"),
+                (5, "May"), (6, "June"), (7, "July"), (8, "August"),
+                (9, "September"), (10, "October"), (11, "November"), (12, "December")
+              ] %}
+              {% for num, name in months %}
+                <option value="{{ num }}" {% if month and month|int==num %}selected{% endif %}>{{ name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <!-- Week -->
+          <div class="col-md-6" id="weekSelect" {% if time_filter!="week" %}style="display:none"{% endif %}>
+            <label class="form-label">Week</label>
+            <select id="filterWeek" class="form-select">
+              {% for w in range(1,6) %}
+                <option value="{{ w }}" {% if week and week|int==w %}selected{% endif %}>Week {{ w }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="applyFilters()">Apply</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
+
+<script>
+const { jsPDF } = window.jspdf;
+
+// Toggle month/week dropdowns inside modal
+const filterTime = document.getElementById("filterTime");
+filterTime.addEventListener("change", () => {
+  document.getElementById("monthSelect").style.display = (filterTime.value=="month" || filterTime.value=="week") ? "block" : "none";
+  document.getElementById("weekSelect").style.display = (filterTime.value=="week") ? "block" : "none";
+});
+
+// Filter Elements
+const filterTypeEl = document.getElementById("filterType");
+const filterYearEl = document.getElementById("filterYear");
+const filterMonthEl = document.getElementById("filterMonth");
+const filterWeekEl = document.getElementById("filterWeek");
+const sortOrderEl = document.getElementById("sortOrder");
+
+// Apply Filters (updates URL)
+function applyFilters() {
+  let type = filterTypeEl.value;
+  let time = filterTime.value;
+  let sort = sortOrderEl.value;
+  let url = `?filter_type=${type}&time_filter=${time}&sort=${sort}&year=${filterYearEl.value}`;
+  if(time=="month") url += `&month=${filterMonthEl.value}`;
+  if(time=="week") url += `&month=${filterMonthEl.value}&week=${filterWeekEl.value}`;
+  window.location.href = url;
+}
+
+// Apply filters on dropdown change (top bar)
+filterTypeEl.addEventListener("change", applyFilters);
+sortOrderEl.addEventListener("change", applyFilters);
+
+// Download table as PDF
+document.getElementById("downloadPDF").addEventListener("click", () => {
+  const doc = new jsPDF();
+  doc.setFontSize(16);
+  doc.text("Transaction History", 14, 20);
+  doc.setFontSize(12);
+
+  // User
+  doc.text(`User: {{ username }}`, 14, 30);
+
+  // Transaction Type
+  const typeText = filterTypeEl.value.charAt(0).toUpperCase() + filterTypeEl.value.slice(1);
+  doc.text(`Transaction Type: ${typeText}`, 14, 38);
+
+  // Duration
+  let durationText = "";
+  const time = filterTime.value;
+  const yearVal = filterYearEl.value;
+  if(time == "year") {
+    durationText = `${yearVal} (Annual Transaction)`;
+  } else if(time == "month") {
+    const monthName = filterMonthEl.options[filterMonthEl.selectedIndex].text;
+    durationText = `${monthName}, ${yearVal} (Monthly Transaction)`;
+  } else if(time == "week") {
+    const monthName = filterMonthEl.options[filterMonthEl.selectedIndex].text;
+    const weekVal = filterWeekEl.value;
+    durationText = `Week ${weekVal} of ${monthName}, ${yearVal} (Weekly Transaction)`;
+  }
+  doc.text(`Duration: ${durationText}`, 14, 46);
+
+  // Table Data
+  const table = document.getElementById("transactionsTable");
+  const headers = [];
+  const rows = [];
+  table.querySelectorAll("thead th").forEach(th => headers.push(th.innerText));
+  table.querySelectorAll("tbody tr").forEach(tr => {
+    const rowData = [];
+    tr.querySelectorAll("td").forEach(td => rowData.push(td.innerText));
+    rows.push(rowData);
+  });
+
+  doc.autoTable({
+    head: [headers],
+    body: rows,
+    startY: 55,
+    styles: { fontSize: 10 },
+  });
+
+  doc.save("transaction_history.pdf");
+});
+</script>
+
+{% endblock %}
